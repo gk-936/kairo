@@ -1,4 +1,5 @@
 
+
 let modelStatus = 'Checking...';
 
 // --- History Management ---
@@ -21,9 +22,10 @@ chrome.runtime.onInstalled.addListener(() => {
     contexts: ['selection']
   });
 
+  // Consolidated menu item for all image analysis
   chrome.contextMenus.create({
-    id: 'generateAltText',
-    title: 'Generate Alt Text with Chrome AI',
+    id: 'analyzeImage',
+    title: 'Analyze Image with AI',
     contexts: ['image']
   });
 });
@@ -31,13 +33,14 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === 'summarize' && info.selectionText) {
     handleSummarizeClick(info, tab);
-  } else if (info.menuItemId === 'generateAltText' && info.srcUrl) {
-    handleGenerateAltTextClick(info, tab);
+  } else if (info.menuItemId === 'analyzeImage' && info.srcUrl) {
+    handleAnalyzeImageClick(info, tab);
   }
 });
 
 async function handleSummarizeClick(info, tab) {
   try {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['marked.min.js'] });
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: summarizeAndShowPayload,
@@ -48,19 +51,19 @@ async function handleSummarizeClick(info, tab) {
   }
 }
 
-async function handleGenerateAltTextClick(info, tab) {
+async function handleAnalyzeImageClick(info, tab) {
   try {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['marked.min.js'] });
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: showPopupPayload,
-      args: ['Generating alt text...']
+      args: ['Analyzing image...', info.srcUrl]
     });
 
-    // The generateAltText function now handles streaming and history
-    await generateAltText(info.srcUrl, tab.id);
+    await analyzeImage(info.srcUrl, tab.id);
 
   } catch (error) {
-    console.error('Failed to generate alt text:', error);
+    console.error('Failed to analyze image:', error);
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: showPopupPayload,
@@ -101,18 +104,18 @@ async function handleGenerateAltTextFromPopup(tab, sendResponse) {
       return;
     }
 
-    const altTexts = [];
+    const results = [];
     for (const url of imageUrls) {
       try {
-        const altText = await getFullAltText(url);
-        await addToHistory({ type: 'alt-text', text: altText });
-        altTexts.push({ url, altText });
+        const analysis = await getFullImageAnalysis(url);
+        await addToHistory({ type: 'image-analysis', text: analysis });
+        results.push({ url, altText: analysis });
       } catch (error) {
-        console.error(`Error generating alt text for ${url}:`, error);
-        altTexts.push({ url, altText: `Error: ${error.message}` });
+        console.error(`Error analyzing image for ${url}:`, error);
+        results.push({ url, altText: `Error: ${error.message}` });
       }
     }
-    sendResponse({ type: 'altTextGenerated', altTexts });
+    sendResponse({ type: 'altTextGenerated', altTexts: results });
   } catch (error) {
     console.error('Failed to inject script or get image URLs:', error);
     sendResponse({ type: 'altTextError', error: error.message });
@@ -127,6 +130,7 @@ async function handleGenerateChartNarrative() {
       throw new Error("Could not find an active tab to capture.");
     }
 
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['marked.min.js'] });
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: showPopupPayload,
@@ -138,7 +142,7 @@ async function handleGenerateChartNarrative() {
       throw new Error("Failed to capture the screen.");
     }
 
-    await generateChartNarrative(imageDataUrl, tab.id);
+    await analyzeImage(imageDataUrl, tab.id, true);
 
   } catch (error) {
     console.error('Failed to generate chart narrative:', error);
@@ -155,8 +159,16 @@ async function handleGenerateChartNarrative() {
 // --- AI Generation Functions ---
 
 // This version streams the result to a UI popup
-async function generateAltText(imageUrl, tabId) {
+async function analyzeImage(imageUrl, tabId, isScreenshot = false) {
   try {
+    if (isScreenshot) {
+        await chrome.scripting.executeScript({
+            target: { tabId: tabId },
+            func: showPopupPayload,
+            args: ['Image captured. Analyzing...', imageUrl]
+        });
+    }
+
     const availability = await LanguageModel.availability();
     if (availability === 'unavailable') {
       throw new Error('The Language Model is not available.');
@@ -165,36 +177,41 @@ async function generateAltText(imageUrl, tabId) {
     const session = await LanguageModel.create({ expectedInputs: [{ type: 'image' }] });
     const imageBlob = await (await fetch(imageUrl)).blob();
 
+    const prompt = `Analyze the following image. First, determine if it is a data visualization (like a chart or graph) or a general photograph/picture.
+- If it is a data visualization, provide a detailed narrative explaining its key insights. Identify major trends, outliers, and the story the data is telling.
+- If it is a general photograph or picture, generate a concise and descriptive alt text for it.
+Provide only the resulting narrative or the alt text.`;
+
     const stream = session.promptStreaming([
       {
         role: 'user',
         content: [
-          { type: 'text', value: 'Generate a concise and descriptive alt text for this image. Focus on key visual elements and context.' },
+          { type: 'text', value: prompt },
           { type: 'image', value: imageBlob }
         ]
       }
     ]);
 
-    let fullAltText = "";
+    let fullAnalysis = "";
     for await (const chunk of stream) {
-      fullAltText += chunk;
+      fullAnalysis += chunk;
       await chrome.scripting.executeScript({
         target: { tabId: tabId },
         func: showPopupPayload,
-        args: [`Alt Text: ${fullAltText}`]
+        args: [fullAnalysis, imageUrl]
       });
     }
 
     session.destroy();
 
-    if (!fullAltText) {
-      throw new Error("The AI model could not generate alt text.");
+    if (!fullAnalysis) {
+      throw new Error("The AI model could not analyze the image.");
     }
 
-    await addToHistory({ type: 'alt-text', text: fullAltText });
+    await addToHistory({ type: 'image-analysis', text: fullAnalysis });
 
   } catch (error) {
-    console.error("Error generating alt text:", error);
+    console.error("Error analyzing image:", error);
     await chrome.scripting.executeScript({
       target: { tabId: tabId },
       func: showPopupPayload,
@@ -203,8 +220,8 @@ async function generateAltText(imageUrl, tabId) {
   }
 }
 
-// This version returns the full text result, used for the popup
-async function getFullAltText(imageUrl) {
+// This version returns the full text result
+async function getFullImageAnalysis(imageUrl) {
   try {
     const availability = await LanguageModel.availability();
     if (availability === 'unavailable') {
@@ -214,11 +231,16 @@ async function getFullAltText(imageUrl) {
     const session = await LanguageModel.create({ expectedInputs: [{ type: 'image' }] });
     const imageBlob = await (await fetch(imageUrl)).blob();
 
+    const prompt = `Analyze the following image. First, determine if it is a data visualization (like a chart or graph) or a general photograph/picture.
+- If it is a data visualization, provide a detailed narrative explaining its key insights. Identify major trends, outliers, and the story the data is telling.
+- If it is a general photograph or picture, generate a concise and descriptive alt text for it.
+Provide only the resulting narrative or the alt text.`;
+
     const stream = session.promptStreaming([
       {
         role: 'user',
         content: [
-          { type: 'text', value: 'Generate a concise and descriptive alt text for this image. Focus on key visual elements and context.' },
+          { type: 'text', value: prompt },
           { type: 'image', value: imageBlob }
         ]
       }
@@ -232,72 +254,15 @@ async function getFullAltText(imageUrl) {
     session.destroy();
     
     if (!result) {
-        throw new Error("The AI model could not generate alt text.");
+        throw new Error("The AI model could not analyze the image.");
     }
     return result;
 
   } catch (error) {
-    console.error("Error generating alt text:", error);
-    return `Alt text generation failed: ${error.message}`;
+    console.error("Error analyzing image:", error);
+    return `Image analysis failed: ${error.message}`;
   }
 }
-
-async function generateChartNarrative(imageDataUrl, tabId) {
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId: tabId },
-      func: showPopupPayload,
-      args: ['Image captured. Analyzing chart...', imageDataUrl]
-    });
-
-    const availability = await LanguageModel.availability();
-    if (availability === 'unavailable') {
-      throw new Error('The Language Model is not available.');
-    }
-
-    const session = await LanguageModel.create({ expectedInputs: [{ type: 'image' }] });
-    const imageBlob = await (await fetch(imageDataUrl)).blob();
-
-    const prompt = `Analyze the chart or graph in this image and generate a coherent, human-readable narrative explaining its key insights. Identify major trends, outliers, relationships between variables, and statistical conclusions. Provide a descriptive text summary that helps a user understand the story the data is telling.`;
-
-    const stream = session.promptStreaming([
-      {
-        role: 'user',
-        content: [
-          { type: 'text', value: prompt },
-          { type: 'image', value: imageBlob }
-        ]
-      }
-    ]);
-
-    let fullNarrative = "";
-    for await (const chunk of stream) {
-      fullNarrative += chunk;
-      await chrome.scripting.executeScript({
-        target: { tabId: tabId },
-        func: showPopupPayload,
-        args: [fullNarrative, imageDataUrl]
-      });
-    }
-
-    session.destroy();
-
-    if (!fullNarrative) {
-      throw new Error("The AI model could not generate a narrative.");
-    }
-
-    await addToHistory({ type: 'chart-narrative', text: fullNarrative });
-
-  } catch (error) {
-    console.error("Error generating chart narrative:", error);
-    await chrome.scripting.executeScript({
-      target: { tabId: tabId },
-      func: showPopupPayload,
-      args: [`Error: ${error.message}`]
-    });
-  }
-}
-
 
 // --- Script Injection Payloads ---
 
@@ -305,9 +270,11 @@ function showPopupPayload(text, imageUrl) {
   let popup = document.getElementById('chrome-ai-summary');
   const title = "Chrome AI Summary";
 
+  const contentHtml = text ? marked.parse(text) : '';
+
   if (popup) {
     const contentDiv = popup.querySelector('div.content');
-    contentDiv.innerHTML = text;
+    contentDiv.innerHTML = contentHtml;
     if (imageUrl) {
       let img = popup.querySelector('img');
       if (!img) {
@@ -332,7 +299,7 @@ function showPopupPayload(text, imageUrl) {
     const imageHtml = imageUrl ? `<img src="${imageUrl}" style="max-width: 100%; max-height: 200px; margin-bottom: 10px;" />` : '';
     popup.innerHTML = `
       <div style="font-weight: bold; margin-bottom: 8px; color: #4285f4;">${title}</div>
-      <div class="content" style="margin-bottom: 12px;">${imageHtml}${text}</div>
+      <div class="content" style="max-height: 300px; overflow-y: auto; margin-bottom: 12px;">${imageHtml}${contentHtml}</div>
       <button onclick="this.parentElement.remove()" style="background: #4285f4; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">Close</button>
     `;
     document.body.appendChild(popup);
@@ -342,10 +309,12 @@ function showPopupPayload(text, imageUrl) {
 async function summarizeAndShowPayload(text) {
   function showPopup(text) {
     let popup = document.getElementById('chrome-ai-summary');
-    const contentDiv = popup ? popup.querySelector('div:nth-child(2)') : null;
+    const contentDiv = popup ? popup.querySelector('div.content') : null;
+
+    const contentHtml = text ? marked.parse(text) : '<div>Generating summary...</div>';
 
     if (popup && contentDiv) {
-        contentDiv.innerHTML = text || '<div>Generating summary...</div>';
+        contentDiv.innerHTML = contentHtml;
     } else {
         popup = document.createElement('div');
         popup.id = 'chrome-ai-summary';
@@ -357,7 +326,7 @@ async function summarizeAndShowPayload(text) {
         `;
         popup.innerHTML = `
             <div style="font-weight: bold; margin-bottom: 8px; color: #4285f4;">Chrome AI Summary</div>
-            <div style="margin-bottom: 12px;">${text || '<div>Generating summary...</div>'}</div>
+            <div class="content" style="max-height: 300px; overflow-y: auto; margin-bottom: 12px;">${contentHtml}</div>
             <button onclick="this.parentElement.remove()" style="background: #4285f4; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">Close</button>
         `;
         document.body.appendChild(popup);
