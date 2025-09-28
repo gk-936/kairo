@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Chrome AI Summarizer</title>
+  <style>
+    body {
+      width: 300px; /* Increased width for history */
+      font-family: Arial, sans-serif;
+      padding: 10px;
+    }
+    .dark-mode {
+      background-color: #333;
+      color: #fff;
+    }
+    .feature {
+      margin-bottom: 10px;
+    }
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 40px;
+      height: 20px;
+    }
+    .switch input { 
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #ccc;
+      transition: .4s;
+      border-radius: 20px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 12px;
+      width: 12px;
+      left: 4px;
+      bottom: 4px;
+      background-color: white;
+      transition: .4s;
+      border-radius: 50%;
+    }
+    input:checked + .slider {
+      background-color: #4285f4;
+    }
+    input:checked + .slider:before {
+      transform: translateX(20px);
+    }
+    #history-container {
+      margin-top: 15px;
+      border-top: 1px solid #ccc;
+      padding-top: 10px;
+    }
+    .history-item {
+      border-bottom: 1px solid #eee;
+      padding: 5px 0;
+      font-size: 0.9em;
+    }
+    .history-item:last-child {
+      border-bottom: none;
+    }
+  </style>
+</head>
+<body>
+  <div style="display: flex; justify-content: space-between; align-items: center;">
+    <h1>Chrome AI Summarizer</h1>
+    <button id="close-popup" style="background: none; border: none; font-size: 1.2em; cursor: pointer;">&times;</button>
+  </div>
+  
+  <div class="feature">
+    <strong>Model Status:</strong> <span id="status">Checking...</span>
+  </div>
+
+  <div class="feature">
+    <button id="simplify">Simplify Text</button>
+  </div>
+
+  <div class="feature">
+    <button id="translate">Translate & Simplify</button>
+  </div>
+
+  <div class="feature">
+    <button id="alt-text">Generate Alt Text (for images)</button>
+  </div>
+
+  <div class="feature" id="alt-text-results">
+    <!-- Alt text results will be displayed here -->
+  </div>
+
+  <div class="feature">
+    <button id="chart-narrator">Smart Chart Narrator</button>
+  </div>
+
+  <div class="feature">
+    <button id="tts">Text-to-Speech</button>
+  </div>
+
+  <div class="feature">
+    <span>Dark Mode</span>
+    <label class="switch">
+      <input type="checkbox" id="dark-mode">
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <div id="history-container">
+    <h2>History</h2>
+    <button id="clear-history">Clear History</button>
+    <div id="history-list"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
